@@ -32,11 +32,20 @@ app
           'Must specificy query param "fips" with comma delimited list of codes',
       });
     }
-    const fipsCodes = req.query.fips
+    const { fips, ...requestedFieldMapping } = req.query;
+    const fipsCodes = fips
       .split(",")
       .map((codeString) => parseInt(codeString.trim(), 10));
+    // query params other than 'fips' define the county data field mapping to columns in the report
+    const countyDataFieldMapping = Object.keys(requestedFieldMapping).length
+      ? requestedFieldMapping
+      : COUNTY_DATA_FIELD_MAPPING; // defaults to COUNTY_DATA_FIELD_MAPPING
     const reportWorkbook = await fetchLatestReportWorkbook();
-    const countyData = getFilteredCountyData(reportWorkbook, fipsCodes);
+    const countyData = getFilteredCountyData(
+      reportWorkbook,
+      fipsCodes,
+      countyDataFieldMapping
+    );
     res.json(countyData);
   })
   .listen(PORT);
@@ -80,51 +89,74 @@ async function downloadWorkbook(url) {
   return workbook;
 }
 
-function getFilteredCountyData(workbook, fipsCodes) {
+function getFilteredCountyData(
+  workbook,
+  fipsCodes,
+  countyDataFieldMapping = COUNTY_DATA_FIELD_MAPPING
+) {
   const reportDate = workbook.getWorksheet("User Notes").getRow(4).getCell("B")
     .value;
-  const cacheKey = `CountyData:${reportDate}:${fipsCodes.sort().join()}`;
+  const cacheKey = `getFilteredCountyData:${reportDate}:${getFipsCodesCacheKey(
+    fipsCodes
+  )}${getFieldMappingCacheKey(countyDataFieldMapping)}`;
   if (lruCache.has(cacheKey)) {
     return lruCache.get(cacheKey);
   }
   const worksheet = workbook.getWorksheet("Counties");
-  const columnFipsCode = worksheet.getColumn("B");
+  const columnFipsCode = worksheet.getColumn(
+    COUNTY_DATA_FIELD_MAPPING.fipsCode
+  );
   const filteredRows = [];
   columnFipsCode.eachCell((cell, rowNumber) => {
     if (fipsCodes.includes(cell.value)) {
       filteredRows.push(rowNumber);
     }
   });
-  const countyTransmissionCategories = filteredRows.map((rowNumber) => {
+  const countyData = filteredRows.map((rowNumber) => {
     const row = worksheet.getRow(rowNumber);
-    const countyName = row.getCell("A").value;
-    const fipsCode = row.getCell("B").value;
-    const areaOfConcernCategory = row.getCell("AG").value;
-    const communityTransmissionLevelLast7 = row.getCell("AI").value;
-    const communityTransmissionLevelPrev7 = row.getCell("AJ").value;
-    const casesLast7DaysNationalPercentage = row.getCell("O").value;
-    const casesLast7Days = row.getCell("P").value;
-    const positivityRateLast7Days = row.getCell("AK").value;
-    const fullyVaccinatedNationalPercentage = row.getCell("CB").value;
-    return {
-      fipsCode,
-      countyName,
-      areaOfConcernCategory,
-      communityTransmissionLevelLast7,
-      communityTransmissionLevelPrev7,
-      casesLast7DaysNationalPercentage,
-      casesLast7Days,
-      positivityRateLast7Days,
-      fullyVaccinatedNationalPercentage,
-    };
+    return getRowCountyData(countyDataFieldMapping, row);
   });
   const result = {
     reportDate,
-    countyTransmissionCategories,
+    countyData,
   };
   lruCache.set(cacheKey, result);
   return result;
 }
+
+function getRowCountyData(countyDataFieldMapping, row) {
+  return Object.entries(countyDataFieldMapping).reduce(
+    (result, [fieldName, column]) => ({
+      ...result,
+      [fieldName]: row.getCell(column).value,
+    }),
+    {}
+  );
+}
+
+function getFipsCodesCacheKey(fipsCodes) {
+  return fipsCodes.sort().join();
+}
+
+function getFieldMappingCacheKey(fieldMapping) {
+  return Object.entries(fieldMapping)
+    .map(([fieldName, column]) => `${fieldName}:${column}`)
+    .sort()
+    .join();
+}
+
+const COUNTY_DATA_FIELD_MAPPING = {
+  countyName: "A",
+  fipsCode: "B",
+  areaOfConcernCategory: "AG",
+  communityTransmissionLevelLast7: "AI",
+  communityTransmissionLevelPrev7: "AJ",
+  casesPer100KLast7Days: "Q",
+  casesLast7Days: "P",
+  positivityRateLast7Days: "AK",
+  fullyVaccinatedPercentPopulation: "CB",
+  fullVaccinated12to17PercentPopulation: "CO",
+};
 
 const DENVER_AREA_FIPS_CODES = [
   8031,
