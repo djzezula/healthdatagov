@@ -55,8 +55,8 @@ async function fetchLatestReportWorkbook() {
   if (lruCache.has(cacheKey)) {
     return lruCache.get(cacheKey);
   }
-  const excelAttachmentUrls = await fetchExcelAttachmentUrls();
-  const fileUrl = excelAttachmentUrls[0]; // latest report at index 0
+  const excelAttachmentUrls = await fetchExcelAttachments();
+  const fileUrl = getLatestReportUrl(excelAttachmentUrls);
   const reportWorkbook = await downloadWorkbook(fileUrl);
   lruCache.set(cacheKey, reportWorkbook);
   return reportWorkbook;
@@ -64,7 +64,7 @@ async function fetchLatestReportWorkbook() {
 
 const ARCHIVE_JSON_URL = "https://healthdata.gov/resource/6hii-ae4f.json";
 
-async function fetchExcelAttachmentUrls() {
+async function fetchExcelAttachments() {
   const response = await client.get(ARCHIVE_JSON_URL);
   const lastReportIndex = response.data.length - 1;
   const lastReport = response.data[lastReportIndex];
@@ -73,9 +73,21 @@ async function fetchExcelAttachmentUrls() {
   const excelAttachments = reportAttachments.filter(({ filename }) =>
     filename.endsWith(".xlsx")
   );
-  const getDownloadUrl = ({ assetId, filename }) =>
-    `https://beta.healthdata.gov/api/views/gqxm-d9w9/files/${assetId}?download=true&filename=${filename}`;
+  const getDownloadUrl = ({ assetId, filename }) => ({
+    url: `https://beta.healthdata.gov/api/views/gqxm-d9w9/files/${assetId}?download=true&filename=${filename}`,
+    filename,
+  });
   return excelAttachments.map(getDownloadUrl);
+}
+
+function getLatestReportUrl(attachments) {
+  const orderedAttachments = attachments
+    .map(({ url, filename }) => {
+      const order = parseInt(filename.match(/(\d+).*\.xlsx$/)[1], 10);
+      return { url, filename, order };
+    })
+    .sort((a, b) => b.order - a.order);
+  return orderedAttachments[0].url;
 }
 
 async function downloadWorkbook(url) {
@@ -85,7 +97,11 @@ async function downloadWorkbook(url) {
     responseType: "stream",
   });
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.read(response.data);
+  try {
+    await workbook.xlsx.read(response.data);
+  } catch (error) {
+    throw new Error(`Unable to read excel file at ${url}`);
+  }
   return workbook;
 }
 
