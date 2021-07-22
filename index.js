@@ -170,8 +170,8 @@ const COUNTY_DATA_FIELD_MAPPING = {
   casesPer100KLast7Days: "Q",
   casesLast7Days: "P",
   positivityRateLast7Days: "AK",
-  fullyVaccinatedPercentPopulation: "CB",
-  fullVaccinated12to17PercentPopulation: "CO",
+  fullyVaccinatedPercentPopulation: "CA",
+  fullVaccinated12to17PercentPopulation: "CN",
 };
 
 const DENVER_AREA_FIPS_CODES = [
